@@ -356,6 +356,13 @@ impl<R> Decompress<R> {
         self.to_colorspace(ffi::J_COLOR_SPACE::JCS_RGB)
     }
 
+    /// Start decompression with conversion from `colorspace` to `colorspace`
+    pub fn from_to_colorspace(mut self, jpeg_colorspace: ColorSpace, out_colorspace: ColorSpace) -> io::Result<DecompressStarted<R>> {
+        self.cinfo.jpeg_color_space = jpeg_colorspace;
+        self.cinfo.out_color_space = out_colorspace;
+        DecompressStarted::start_decompress(self)
+    }
+
     /// Start decompression with conversion to `colorspace`
     pub fn to_colorspace(mut self, colorspace: ColorSpace) -> io::Result<DecompressStarted<R>> {
         self.cinfo.out_color_space = colorspace;

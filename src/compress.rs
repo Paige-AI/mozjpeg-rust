@@ -126,9 +126,61 @@ impl Compress {
         }
         Ok(started)
     }
+
+    /// Equivalent of `Compress::start_compress()` that suppress quantization and huffman tables
+    /// from the output.
+    ///
+    /// See jpeg_suppress_tables() and jpeg_start_compress() in jpegdocs
+    ///
+    /// ## Panics
+    ///
+    /// It may panic, like all functions of this library.
+    pub fn start_compress_suppressing_tables<W: io::Write>(self, writer: W) -> io::Result<CompressStarted<W>> {
+        if !self.components().iter().any(|c| c.h_samp_factor == 1) { return Err(io::Error::new(io::ErrorKind::InvalidInput, "at least one h_samp_factor must be 1")); }
+        if !self.components().iter().any(|c| c.v_samp_factor == 1) { return Err(io::Error::new(io::ErrorKind::InvalidInput, "at least one v_samp_factor must be 1")); }
+
+        // 1bpp, rounded to 4K page
+        let expected_file_size = (self.cinfo.image_width as usize * self.cinfo.image_height as usize / 8 + 4095) & !4095;
+        let write_buffer_capacity = expected_file_size.clamp(1<<12, 1<<16);
+
+        let mut started = CompressStarted {
+            compress: self,
+            dest_mgr: Box::new(DestinationMgr::new(writer, write_buffer_capacity)),
+        };
+        unsafe {
+            let dest_ptr = addr_of_mut!(started.dest_mgr.as_mut().iface);
+            started.compress.cinfo.dest = dest_ptr;
+            ffi::jpeg_suppress_tables(&mut started.compress.cinfo, true as boolean);
+            ffi::jpeg_start_compress(&mut started.compress.cinfo, false as boolean);
+        }
+        Ok(started)
+    }
+
+    /// Initializes the compression process without starting the actual compression, useful for generating JPEG tables.
+    pub fn start_without_compressing<W: io::Write>(self, writer: W) -> CompressStarted<W> {
+        let mut started = CompressStarted {
+            compress: self,
+            dest_mgr: Box::new(DestinationMgr::new(writer, 0)),
+        };
+
+        started.compress.cinfo.dest = addr_of_mut!(started.dest_mgr.as_mut().iface);
+
+        started
+    }
 }
 
 impl<W> CompressStarted<W> {
+    /// Advanced. Explicitly write out quantization and Huffman tables.
+    /// Can be used to create separate streams with tables and image data,
+    /// such as used for TIFF/JPEG images.
+    ///
+    /// See jpeg_write_tables in libjpeg docs.
+    pub fn write_jpeg_tables(&mut self) {
+        unsafe {
+            ffi::jpeg_write_tables(&mut self.compress.cinfo);
+        }
+    }
+
     /// Add a marker to compressed file
     ///
     /// Data is max 64KB
